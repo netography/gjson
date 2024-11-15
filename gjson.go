@@ -469,6 +469,29 @@ end:
 // use the Valid function first.
 func Parse(json string) Result {
 	var value Result
+	value.Parse(json)
+	return value
+}
+
+// Clear for pooling
+func (value *Result) Clear() {
+	value.Type = 0
+	value.Raw = ""
+	value.Str = ""
+	value.Num = 0
+	value.Index = 0
+	if value.Indexes != nil {
+		value.Indexes = value.Indexes[:0]
+	}
+}
+
+// ParseBytes into an existing Result
+func (value *Result) ParseBytes(json []byte) {
+	value.Parse(string(json))
+}
+
+// Parse into an existing Result
+func (value *Result) Parse(json string) {
 	i := 0
 	for ; i < len(json); i++ {
 		if json[i] == '{' || json[i] == '[' {
