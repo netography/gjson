@@ -8,6 +8,7 @@
 package gjson
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +63,7 @@ type Result struct {
 	// Type is the json type
 	Type Type
 	// Raw is the raw json
-	Raw string
+	Raw []byte
 	// Str is the json string
 	Str string
 	// Num is the json number
@@ -95,11 +96,11 @@ func (t Result) String() string {
 				return strconv.FormatFloat(t.Num, 'f', -1, 64)
 			}
 		}
-		return t.Raw
+		return string(t.Raw)
 	case String:
 		return t.Str
 	case JSON:
-		return t.Raw
+		return string(t.Raw)
 	case True:
 		return "true"
 	}
@@ -128,7 +129,7 @@ func (t Result) Int() int64 {
 	case True:
 		return 1
 	case String:
-		n, _ := parseInt(t.Str)
+		n, _ := parseInt([]byte(t.Str))
 		return n
 	case Number:
 		// try to directly convert the float64 to int64
@@ -154,7 +155,7 @@ func (t Result) Uint() uint64 {
 	case True:
 		return 1
 	case String:
-		n, _ := parseUint(t.Str)
+		n, _ := parseUint([]byte(t.Str))
 		return n
 	case Number:
 		// try to directly convert the float64 to uint64
@@ -258,7 +259,7 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 			return
 		}
 	}
-	var str string
+	var str []byte
 	var vesc bool
 	var ok bool
 	var idx int
@@ -273,9 +274,9 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 				return
 			}
 			if vesc {
-				key.Str = unescape(str[1 : len(str)-1])
+				key.Str = string(unescape(str[1 : len(str)-1]))
 			} else {
-				key.Str = str[1 : len(str)-1]
+				key.Str = string(str[1 : len(str)-1])
 			}
 			key.Raw = str
 			key.Index = s + t.Index
@@ -320,7 +321,7 @@ func (t Result) Map() map[string]Result {
 // Get searches result for the specified path.
 // The result should be a JSON array or object.
 func (t Result) Get(path string) Result {
-	r := Get(t.Raw, path)
+	r := GetBytes(t.Raw, path)
 	if len(r.Indexes) > 0 {
 		for i := 0; i < len(r.Indexes); i++ {
 			r.Indexes[i] += t.Index
@@ -476,7 +477,7 @@ func Parse(json string) Result {
 // Clear for pooling
 func (value *Result) Clear() {
 	value.Type = 0
-	value.Raw = ""
+	value.Raw = value.Raw[:0]
 	value.Str = ""
 	value.Num = 0
 	value.Index = 0
@@ -486,12 +487,12 @@ func (value *Result) Clear() {
 }
 
 // ParseBytes into an existing Result
-func (value *Result) ParseBytes(json []byte) {
-	value.Parse(string(json))
+func (value *Result) Parse(json string) {
+	value.ParseBytes([]byte(json))
 }
 
 // Parse into an existing Result
-func (value *Result) Parse(json string) {
+func (value *Result) ParseBytes(json []byte) {
 	i := 0
 	for ; i < len(json); i++ {
 		if json[i] == '{' || json[i] == '[' {
@@ -540,10 +541,12 @@ func (value *Result) Parse(json string) {
 // ParseBytes parses the json and returns a result.
 // If working with bytes, this method preferred over Parse(string(data))
 func ParseBytes(json []byte) Result {
-	return Parse(string(json))
+	var value Result
+	value.ParseBytes(json)
+	return value
 }
 
-func squash(json string) string {
+func squash(json []byte) []byte {
 	// expects that the lead character is a '[' or '{' or '(' or '"'
 	// squash the value, ignoring all nested arrays and objects.
 	var i, depth int
@@ -596,30 +599,30 @@ func squash(json string) string {
 	return json
 }
 
-func tonum(json string) (raw string, num float64) {
+func tonum(json []byte) (raw []byte, num float64) {
 	for i := 1; i < len(json); i++ {
 		// less than dash might have valid characters
 		if json[i] <= '-' {
 			if json[i] <= ' ' || json[i] == ',' {
 				// break on whitespace and comma
 				raw = json[:i]
-				num, _ = strconv.ParseFloat(raw, 64)
+				num, _ = strconv.ParseFloat(string(raw), 64)
 				return
 			}
 			// could be a '+' or '-'. let's assume so.
 		} else if json[i] == ']' || json[i] == '}' {
 			// break on ']' or '}'
 			raw = json[:i]
-			num, _ = strconv.ParseFloat(raw, 64)
+			num, _ = strconv.ParseFloat(string(raw), 64)
 			return
 		}
 	}
 	raw = json
-	num, _ = strconv.ParseFloat(raw, 64)
+	num, _ = strconv.ParseFloat(string(raw), 64)
 	return
 }
 
-func tolit(json string) (raw string) {
+func tolit(json []byte) (raw []byte) {
 	for i := 1; i < len(json); i++ {
 		if json[i] < 'a' || json[i] > 'z' {
 			return json[:i]
@@ -628,14 +631,14 @@ func tolit(json string) (raw string) {
 	return json
 }
 
-func tostr(json string) (raw string, str string) {
+func tostr(json []byte) (raw []byte, str string) {
 	// expects that the lead character is a '"'
 	for i := 1; i < len(json); i++ {
 		if json[i] > '\\' {
 			continue
 		}
 		if json[i] == '"' {
-			return json[:i+1], json[1:i]
+			return json[:i+1], string(json[1:i])
 		}
 		if json[i] == '\\' {
 			i++
@@ -657,19 +660,19 @@ func tostr(json string) (raw string, str string) {
 							continue
 						}
 					}
-					return json[:i+1], unescape(json[1:i])
+					return json[:i+1], string(unescape(json[1:i]))
 				}
 			}
-			var ret string
+			var ret []byte
 			if i+1 < len(json) {
 				ret = json[:i+1]
 			} else {
 				ret = json[:i]
 			}
-			return ret, unescape(json[1:i])
+			return ret, string(unescape(json[1:i]))
 		}
 	}
-	return json, json[1:]
+	return json, string(json[1:])
 }
 
 // Exists returns true if value exists.
@@ -714,7 +717,7 @@ func (t Result) Value() interface{} {
 	}
 }
 
-func parseString(json string, i int) (int, string, bool, bool) {
+func parseString(json []byte, i int) (int, []byte, bool, bool) {
 	var s = i
 	for ; i < len(json); i++ {
 		if json[i] > '\\' {
@@ -752,7 +755,7 @@ func parseString(json string, i int) (int, string, bool, bool) {
 	return i, json[s-1:], false, false
 }
 
-func parseNumber(json string, i int) (int, string) {
+func parseNumber(json []byte, i int) (int, []byte) {
 	var s = i
 	i++
 	for ; i < len(json); i++ {
@@ -764,7 +767,7 @@ func parseNumber(json string, i int) (int, string) {
 	return i, json[s:]
 }
 
-func parseLiteral(json string, i int) (int, string) {
+func parseLiteral(json []byte, i int) (int, []byte) {
 	var s = i
 	i++
 	for ; i < len(json); i++ {
@@ -789,7 +792,7 @@ type arrayPathResult struct {
 		all   bool
 		path  string
 		op    string
-		value string
+		value []byte
 	}
 }
 
@@ -877,11 +880,11 @@ func parseArrayPath(path string) (r arrayPathResult) {
 //	                           # middle
 //	.cap                       # right
 func parseQuery(query string) (
-	path, op, value, remain string, i int, vesc, ok bool,
+	path, op string, value []byte, remain string, i int, vesc, ok bool,
 ) {
 	if len(query) < 2 || query[0] != '#' ||
 		(query[1] != '(' && query[1] != '[') {
-		return "", "", "", "", i, false, false
+		return "", "", []byte{}, "", i, false, false
 	}
 	i = 2
 	j := 0 // start of value part
@@ -918,11 +921,11 @@ func parseQuery(query string) (
 		}
 	}
 	if depth > 0 {
-		return "", "", "", "", i, false, false
+		return "", "", []byte{}, "", i, false, false
 	}
 	if j > 0 {
-		path = trim(query[2:j])
-		value = trim(query[j:i])
+		path = string(trim([]byte(query)[2:j]))
+		value = trim([]byte(query)[j:i])
 		remain = query[i+1:]
 		// parse the compare op from the value
 		var opsz int
@@ -949,16 +952,16 @@ func parseQuery(query string) (
 		case value[0] == '%':
 			opsz = 1
 		}
-		op = value[:opsz]
+		op = string(value[:opsz])
 		value = trim(value[opsz:])
 	} else {
-		path = trim(query[2:i])
+		path = string(trim([]byte(query[2:i])))
 		remain = query[i+1:]
 	}
 	return path, op, value, remain, i + 1, vesc, true
 }
 
-func trim(s string) string {
+func trim(s []byte) []byte {
 left:
 	if len(s) > 0 && s[0] <= ' ' {
 		s = s[1:]
@@ -1073,7 +1076,7 @@ var vchars = [256]byte{
 	'"': 2, '{': 3, '(': 3, '[': 3, '}': 1, ')': 1, ']': 1,
 }
 
-func parseSquash(json string, i int) (int, string) {
+func parseSquash(json []byte, i int) (int, []byte) {
 	// expects that the lead character is a '[' or '{' or '('
 	// squash the value, ignoring all nested arrays and objects.
 	// the first '[' or '{' or '(' has already been read
@@ -1217,7 +1220,8 @@ func parseSquash(json string, i int) (int, string) {
 
 func parseObject(c *parseContext, i int, path string) (int, bool) {
 	var pmatch, kesc, vesc, ok, hit bool
-	var key, val string
+	var key string 
+	var val []byte
 	rp := parseObjectPath(path)
 	if !rp.more && rp.piped {
 		c.pipe = rp.pipe
@@ -1236,7 +1240,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 						continue
 					}
 					if c.json[i] == '"' {
-						i, key, kesc, ok = i+1, c.json[s:i], false, true
+						i, key, kesc, ok = i+1, string(c.json[s:i]), false, true
 						goto parse_key_string_done
 					}
 					if c.json[i] == '\\' {
@@ -1259,14 +1263,14 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 										continue
 									}
 								}
-								i, key, kesc, ok = i+1, c.json[s:i], true, true
+								i, key, kesc, ok = i+1, string(c.json[s:i]), true, true
 								goto parse_key_string_done
 							}
 						}
 						break
 					}
 				}
-				key, kesc, ok = c.json[s:], false, false
+				key, kesc, ok = string(c.json[s:]), false, false
 			parse_key_string_done:
 				break
 			}
@@ -1279,13 +1283,13 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 		}
 		if rp.wild {
 			if kesc {
-				pmatch = matchLimit(unescape(key), rp.part)
+				pmatch = matchLimit(unescape([]byte(key)), rp.part)
 			} else {
-				pmatch = matchLimit(key, rp.part)
+				pmatch = matchLimit([]byte(key), rp.part)
 			}
 		} else {
 			if kesc {
-				pmatch = rp.part == unescape(key)
+				pmatch = bytes.Equal([]byte(rp.part), unescape([]byte(key)))
 			} else {
 				pmatch = rp.part == key
 			}
@@ -1304,9 +1308,9 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				}
 				if hit {
 					if vesc {
-						c.value.Str = unescape(val[1 : len(val)-1])
+						c.value.Str = string(unescape(val[1 : len(val)-1]))
 					} else {
-						c.value.Str = val[1 : len(val)-1]
+						c.value.Str = string( val[1 : len(val)-1])
 					}
 					c.value.Raw = val
 					c.value.Type = String
@@ -1368,7 +1372,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				if hit {
 					c.value.Raw = val
 					c.value.Type = Number
-					c.value.Num, _ = strconv.ParseFloat(val, 64)
+					c.value.Num, _ = strconv.ParseFloat(string(val), 64)
 					return i, true
 				}
 			}
@@ -1381,8 +1385,8 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 // matchLimit will limit the complexity of the match operation to avoid ReDos
 // attacks from arbitrary inputs.
 // See the github.com/tidwall/match.MatchLimit function for more information.
-func matchLimit(str, pattern string) bool {
-	matched, _ := match.MatchLimit(str, pattern, 10000)
+func matchLimit(str []byte, pattern string) bool {
+	matched, _ := match.MatchLimit(string(str), pattern, 10000)
 	return matched
 }
 
@@ -1426,6 +1430,13 @@ func nullish(t Result) bool {
 	return t.Type == Null
 }
 
+var (
+	bTrue = []byte("true")
+	bFalse = []byte("false")
+	bNull = []byte("null")
+	bStar = []byte("*")
+)
+
 func queryMatches(rp *arrayPathResult, value Result) bool {
 	rpv := rp.query.value
 	if len(rpv) > 0 {
@@ -1433,26 +1444,26 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 			// convert to bool
 			rpv = rpv[1:]
 			var ish, ok bool
-			switch rpv {
-			case "*":
+			switch {
+			case bytes.Equal(rpv, bStar):
 				ish, ok = value.Exists(), true
-			case "null":
+			case bytes.Equal(rpv, bNull):
 				ish, ok = nullish(value), true
-			case "true":
+			case bytes.Equal(rpv, bTrue):
 				ish, ok = trueish(value), true
-			case "false":
+			case bytes.Equal(rpv, bFalse):
 				ish, ok = falseish(value), true
 			}
 			if ok {
-				rpv = "true"
+				rpv = bTrue
 				if ish {
 					value = Result{Type: True}
 				} else {
 					value = Result{Type: False}
 				}
 			} else {
-				rpv = ""
-				value = Result{}
+				rpv = []byte{}
+				value.Clear()
 			}
 		}
 	}
@@ -1470,24 +1481,24 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 	case String:
 		switch rp.query.op {
 		case "=":
-			return value.Str == rpv
+			return value.Str == string(rpv)
 		case "!=":
-			return value.Str != rpv
+			return value.Str != string(rpv)
 		case "<":
-			return value.Str < rpv
+			return value.Str < string(rpv)
 		case "<=":
-			return value.Str <= rpv
+			return value.Str <= string(rpv)
 		case ">":
-			return value.Str > rpv
+			return value.Str > string(rpv)
 		case ">=":
-			return value.Str >= rpv
+			return value.Str >= string(rpv)
 		case "%":
-			return matchLimit(value.Str, rpv)
+			return matchLimit([]byte(value.Str), string(rpv)) // TODO: can we use value.Raw
 		case "!%":
-			return !matchLimit(value.Str, rpv)
+			return !matchLimit([]byte(value.Str), string(rpv)) // TODO: can we use value.Raw
 		}
 	case Number:
-		rpvn, _ := strconv.ParseFloat(rpv, 64)
+		rpvn, _ := strconv.ParseFloat(string(rpv), 64)
 		switch rp.query.op {
 		case "=":
 			return value.Num == rpvn
@@ -1505,22 +1516,22 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 	case True:
 		switch rp.query.op {
 		case "=":
-			return rpv == "true"
+			return bytes.Equal(rpv, bTrue) 
 		case "!=":
-			return rpv != "true"
+			return !bytes.Equal(rpv, bTrue)
 		case ">":
-			return rpv == "false"
+			return bytes.Equal(rpv, bFalse)
 		case ">=":
 			return true
 		}
 	case False:
 		switch rp.query.op {
 		case "=":
-			return rpv == "false"
+			return bytes.Equal(rpv, bFalse)
 		case "!=":
-			return rpv != "false"
+			return !bytes.Equal(rpv, bFalse)
 		case "<":
-			return rpv == "true"
+			return bytes.Equal(rpv, bTrue) 
 		case "<=":
 			return true
 		}
@@ -1529,7 +1540,7 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 }
 func parseArray(c *parseContext, i int, path string) (int, bool) {
 	var pmatch, vesc, ok, hit bool
-	var val string
+	var val []byte
 	var h int
 	var alog []int
 	var partidx int
@@ -1537,7 +1548,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 	var queryIndexes []int
 	rp := parseArrayPath(path)
 	if !rp.arrch {
-		n, ok := parseUint(rp.part)
+		n, ok := parseUint([]byte(rp.part))
 		if !ok {
 			partidx = -1
 		} else {
@@ -1583,9 +1594,9 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 			if rp.query.all {
 				raw := res.Raw
 				if len(raw) == 0 {
-					raw = res.String()
+					raw = res.Raw
 				}
-				if raw != "" {
+				if len(raw) > 0 {
 					if len(multires) > 1 {
 						multires = append(multires, ',')
 					}
@@ -1630,9 +1641,9 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				if rp.query.on {
 					var qval Result
 					if vesc {
-						qval.Str = unescape(val[1 : len(val)-1])
+						qval.Str = string(unescape(val[1 : len(val)-1]))
 					} else {
-						qval.Str = val[1 : len(val)-1]
+						qval.Str = string(val[1 : len(val)-1])
 					}
 					qval.Raw = val
 					qval.Type = String
@@ -1644,9 +1655,9 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 						break
 					}
 					if vesc {
-						c.value.Str = unescape(val[1 : len(val)-1])
+						c.value.Str = string(unescape(val[1 : len(val)-1]))
 					} else {
-						c.value.Str = val[1 : len(val)-1]
+						c.value.Str = string(val[1 : len(val)-1])
 					}
 					c.value.Raw = val
 					c.value.Type = String
@@ -1769,7 +1780,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 										}
 										raw := res.Raw
 										if len(raw) == 0 {
-											raw = res.String()
+											raw = []byte(res.String())
 										}
 										jsons = append(jsons, []byte(raw)...)
 										indexes = append(indexes, res.Index)
@@ -1780,7 +1791,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 						}
 						jsons = append(jsons, ']')
 						c.value.Type = JSON
-						c.value.Raw = string(jsons)
+						c.value.Raw = jsons
 						c.value.Indexes = indexes
 						return i + 1, true
 					}
@@ -1790,20 +1801,20 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 
 					c.value.Type = Number
 					c.value.Num = float64(h - 1)
-					c.value.Raw = strconv.Itoa(h - 1)
+					c.value.Raw = []byte(strconv.Itoa(h - 1))
 					c.calcd = true
 					return i + 1, true
 				}
 				if !c.value.Exists() {
 					if len(multires) > 0 {
 						c.value = Result{
-							Raw:     string(append(multires, ']')),
+							Raw:     append(multires, ']'),
 							Type:    JSON,
 							Indexes: queryIndexes,
 						}
 					} else if rp.query.all {
 						c.value = Result{
-							Raw:  "[]",
+							Raw:  []byte("[]"),
 							Type: JSON,
 						}
 					}
@@ -1816,7 +1827,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					var qval Result
 					qval.Raw = val
 					qval.Type = Number
-					qval.Num, _ = strconv.ParseFloat(val, 64)
+					qval.Num, _ = strconv.ParseFloat(string(val), 64)
 					if procQuery(qval) {
 						return i, true
 					}
@@ -1826,7 +1837,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					}
 					c.value.Raw = val
 					c.value.Type = Number
-					c.value.Num, _ = strconv.ParseFloat(val, 64)
+					c.value.Num, _ = strconv.ParseFloat(string(val), 64)
 					return i, true
 				}
 			}
@@ -1851,12 +1862,12 @@ func splitPossiblePipe(path string) (left, right string, ok bool) {
 	}
 
 	if len(path) > 0 && path[0] == '{' {
-		squashed := squash(path[1:])
+		squashed := squash([]byte(path)[1:])
 		if len(squashed) < len(path)-1 {
-			squashed = path[:len(squashed)+1]
+			squashed = []byte(path)[:len(squashed)+1]
 			remain := path[len(squashed):]
 			if remain[0] == '|' {
-				return squashed, remain[1:], true
+				return string(squashed), remain[1:], true
 			}
 		}
 		return
@@ -1922,6 +1933,23 @@ func splitPossiblePipe(path string) (left, right string, ok bool) {
 // format (http://jsonlines.org/).
 // Each line is returned as a GJSON Result.
 func ForEachLine(json string, iterator func(line Result) bool) {
+	var res Result
+	var i int
+	for {
+		i, res, _ = parseAny([]byte(json), i, true)
+		if !res.Exists() {
+			break
+		}
+		if !iterator(res) {
+			return
+		}
+	}
+}
+
+// ForEachLineBytes iterates through lines of JSON as specified by the JSON Lines
+// format (http://jsonlines.org/).
+// Each line is returned as a GJSON Result.
+func ForEachLineBytes(json []byte, iterator func(line Result) bool) {
 	var res Result
 	var i int
 	for {
@@ -2108,7 +2136,7 @@ func AppendJSONString(dst []byte, s string) []byte {
 }
 
 type parseContext struct {
-	json  string
+	json  []byte
 	value Result
 	pipe  string
 	piped bool
@@ -2155,21 +2183,21 @@ func Get(json, path string) Result {
 			// possible modifier
 			var ok bool
 			var npath string
-			var rjson string
+			var rjson []byte
 			if path[0] == '@' && !DisableModifiers {
-				npath, rjson, ok = execModifier(json, path)
+				npath, rjson, ok = execModifier([]byte(json), path)
 			} else if path[0] == '!' {
-				npath, rjson, ok = execStatic(json, path)
+				npath, rjson, ok = execStatic([]byte(json), path)
 			}
 			if ok {
 				path = npath
 				if len(path) > 0 && (path[0] == '|' || path[0] == '.') {
-					res := Get(rjson, path[1:])
+					res := Get(string(rjson), path[1:])
 					res.Index = 0
 					res.Indexes = nil
 					return res
 				}
-				return Parse(rjson)
+				return ParseBytes(rjson)
 			}
 		}
 		if path[0] == '[' || path[0] == '{' {
@@ -2206,11 +2234,11 @@ func Get(json, path string) Result {
 								}
 								b = append(b, ':')
 							}
-							var raw string
+							var raw []byte
 							if len(res.Raw) == 0 {
-								raw = res.String()
+								raw = []byte(res.String())
 								if len(raw) == 0 {
-									raw = "null"
+									raw = bNull
 								}
 							} else {
 								raw = res.Raw
@@ -2221,7 +2249,7 @@ func Get(json, path string) Result {
 					}
 					b = append(b, kind+2)
 					var res Result
-					res.Raw = string(b)
+					res.Raw = b
 					res.Type = JSON
 					if len(path) > 0 {
 						res = res.Get(path[1:])
@@ -2233,7 +2261,7 @@ func Get(json, path string) Result {
 		}
 	}
 	var i int
-	var c = &parseContext{json: json}
+	var c = &parseContext{json: []byte(json)}
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
 		parseArray(c, 0, path[2:])
@@ -2256,7 +2284,7 @@ func Get(json, path string) Result {
 		res.Index = 0
 		return res
 	}
-	fillIndex(json, c)
+	fillIndex([]byte(json), c)
 	return c.value
 }
 
@@ -2267,28 +2295,28 @@ func GetBytes(json []byte, path string) Result {
 }
 
 // runeit returns the rune from the the \uXXXX
-func runeit(json string) rune {
-	n, _ := strconv.ParseUint(json[:4], 16, 64)
+func runeit(json []byte) rune {
+	n, _ := strconv.ParseUint(string(json[:4]), 16, 64)
 	return rune(n)
 }
 
 // unescape unescapes a string
-func unescape(json string) string {
+func unescape(json []byte) []byte {
 	var str = make([]byte, 0, len(json))
 	for i := 0; i < len(json); i++ {
 		switch {
 		default:
 			str = append(str, json[i])
 		case json[i] < ' ':
-			return string(str)
+			return str
 		case json[i] == '\\':
 			i++
 			if i >= len(json) {
-				return string(str)
+				return str
 			}
 			switch json[i] {
 			default:
-				return string(str)
+				return str
 			case '\\':
 				str = append(str, '\\')
 			case '/':
@@ -2307,7 +2335,7 @@ func unescape(json string) string {
 				str = append(str, '"')
 			case 'u':
 				if i+5 > len(json) {
-					return string(str)
+					return str
 				}
 				r := runeit(json[i+1:])
 				i += 5
@@ -2328,7 +2356,7 @@ func unescape(json string) string {
 			}
 		}
 	}
-	return string(str)
+	return str
 }
 
 // Less return true if a token is less than another token.
@@ -2352,7 +2380,7 @@ func (t Result) Less(token Result, caseSensitive bool) bool {
 	if t.Type == Number {
 		return t.Num < token.Num
 	}
-	return t.Raw < token.Raw
+	return string(t.Raw) < string(token.Raw)
 }
 
 func stringLessInsensitive(a, b string) bool {
@@ -2395,9 +2423,9 @@ func stringLessInsensitive(a, b string) bool {
 // parseAny parses the next value from a json string.
 // A Result is returned when the hit param is set.
 // The return values are (i int, res Result, ok bool)
-func parseAny(json string, i int, hit bool) (int, Result, bool) {
+func parseAny(json []byte, i int, hit bool) (int, Result, bool) {
 	var res Result
-	var val string
+	var val []byte
 	for ; i < len(json); i++ {
 		if json[i] == '{' || json[i] == '[' {
 			i, val = parseSquash(json, i)
@@ -2427,9 +2455,9 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 				res.Type = String
 				res.Raw = val
 				if vesc {
-					res.Str = unescape(val[1 : len(val)-1])
+					res.Str = string(unescape(val[1 : len(val)-1]))
 				} else {
-					res.Str = val[1 : len(val)-1]
+					res.Str = string(val[1 : len(val)-1])
 				}
 			}
 			return i, res, true
@@ -2461,7 +2489,7 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 			if hit {
 				res.Raw = val
 				res.Type = Number
-				res.Num, _ = strconv.ParseFloat(val, 64)
+				res.Num, _ = strconv.ParseFloat(string(val), 64)
 			}
 			return i, res, true
 		}
@@ -2786,7 +2814,7 @@ func ValidBytes(json []byte) bool {
 	return ok
 }
 
-func parseUint(s string) (n uint64, ok bool) {
+func parseUint(s []byte) (n uint64, ok bool) {
 	var i int
 	if i == len(s) {
 		return 0, false
@@ -2801,7 +2829,7 @@ func parseUint(s string) (n uint64, ok bool) {
 	return n, true
 }
 
-func parseInt(s string) (n int64, ok bool) {
+func parseInt(s []byte) (n int64, ok bool) {
 	var i int
 	var sign bool
 	if len(s) > 0 && s[0] == '-' {
@@ -2837,13 +2865,13 @@ func safeInt(f float64) (n int64, ok bool) {
 
 // execStatic parses the path to find a static value.
 // The input expects that the path already starts with a '!'
-func execStatic(json, path string) (pathOut, res string, ok bool) {
+func execStatic(_ []byte, path string) (pathOut string, res []byte, ok bool) {
 	name := path[1:]
 	if len(name) > 0 {
 		switch name[0] {
 		case '{', '[', '"', '+', '-', '0', '1', '2', '3', '4', '5', '6', '7',
 			'8', '9':
-			_, res = parseSquash(name, 0)
+			_, res = parseSquash([]byte(name), 0)
 			pathOut = name[len(res):]
 			return pathOut, res, true
 		}
@@ -2862,14 +2890,14 @@ func execStatic(json, path string) (pathOut, res string, ok bool) {
 	}
 	switch strings.ToLower(name) {
 	case "true", "false", "null", "nan", "inf":
-		return pathOut, name, true
+		return pathOut, []byte(name), true
 	}
 	return pathOut, res, false
 }
 
 // execModifier parses the path to find a matching modifier function.
 // The input expects that the path already starts with a '@'
-func execModifier(json, path string) (pathOut, res string, ok bool) {
+func execModifier(json []byte, path string) (pathOut string, res []byte, ok bool) {
 	name := path[1:]
 	var hasArgs bool
 	for i := 1; i < len(path); i++ {
@@ -2899,7 +2927,7 @@ func execModifier(json, path string) (pathOut, res string, ok bool) {
 				// json arg
 				res := Parse(pathOut)
 				if res.Exists() {
-					args = squash(pathOut)
+					args = string(squash([]byte(pathOut)))
 					pathOut = pathOut[len(args):]
 					parsedArgs = true
 				}
@@ -2913,7 +2941,7 @@ func execModifier(json, path string) (pathOut, res string, ok bool) {
 					}
 					switch pathOut[i] {
 					case '{', '[', '"', '(':
-						s := squash(pathOut[i:])
+						s := squash([]byte(pathOut)[i:])
 						i += len(s) - 1
 					}
 				}
@@ -2927,7 +2955,7 @@ func execModifier(json, path string) (pathOut, res string, ok bool) {
 }
 
 // unwrap removes the '[]' or '{}' characters around json
-func unwrap(json string) string {
+func unwrap(json []byte) []byte {
 	json = trim(json)
 	if len(json) >= 2 && (json[0] == '[' || json[0] == '{') {
 		json = json[1 : len(json)-1]
@@ -2938,10 +2966,10 @@ func unwrap(json string) string {
 // DisableModifiers will disable the modifier syntax
 var DisableModifiers = false
 
-var modifiers map[string]func(json, arg string) string
+var modifiers map[string]func(json []byte, arg string) []byte
 
 func init() {
-	modifiers = map[string]func(json, arg string) string{
+	modifiers = map[string]func(json []byte, arg string) []byte{
 		"pretty":  modPretty,
 		"ugly":    modUgly,
 		"reverse": modReverse,
@@ -2961,12 +2989,12 @@ func init() {
 // AddModifier binds a custom modifier command to the GJSON syntax.
 // This operation is not thread safe and should be executed prior to
 // using all other gjson function.
-func AddModifier(name string, fn func(json, arg string) string) {
+func AddModifier(name string, fn func(json []byte, arg string) []byte) {
 	modifiers[name] = fn
 }
 
 // ModifierExists returns true when the specified modifier exists.
-func ModifierExists(name string, fn func(json, arg string) string) bool {
+func ModifierExists(name string, _ func(json []byte, arg string) []byte) bool {
 	_, ok := modifiers[name]
 	return ok
 }
@@ -2992,7 +3020,7 @@ func cleanWS(s string) string {
 }
 
 // @pretty modifier makes the json look nice.
-func modPretty(json, arg string) string {
+func modPretty(json []byte, arg string) []byte {
 	if len(arg) > 0 {
 		opts := *pretty.DefaultOptions
 		Parse(arg).ForEach(func(key, value Result) bool {
@@ -3008,24 +3036,24 @@ func modPretty(json, arg string) string {
 			}
 			return true
 		})
-		return bytesString(pretty.PrettyOptions(stringBytes(json), &opts))
+		return pretty.PrettyOptions(json, &opts)
 	}
-	return bytesString(pretty.Pretty(stringBytes(json)))
+	return pretty.Pretty(json)
 }
 
 // @this returns the current element. Can be used to retrieve the root element.
-func modThis(json, arg string) string {
+func modThis(json []byte, arg string) []byte {
 	return json
 }
 
 // @ugly modifier removes all whitespace.
-func modUgly(json, arg string) string {
-	return bytesString(pretty.Ugly(stringBytes(json)))
+func modUgly(json []byte, arg string) []byte {
+	return pretty.Ugly(json)
 }
 
 // @reverse reverses array elements or root object members.
-func modReverse(json, arg string) string {
-	res := Parse(json)
+func modReverse(json []byte, arg string) []byte {
+	res := ParseBytes(json)
 	if res.IsArray() {
 		var values []Result
 		res.ForEach(func(_, value Result) bool {
@@ -3041,7 +3069,7 @@ func modReverse(json, arg string) string {
 			out = append(out, values[i].Raw...)
 		}
 		out = append(out, ']')
-		return bytesString(out)
+		return out
 	}
 	if res.IsObject() {
 		var keyValues []Result
@@ -3060,7 +3088,7 @@ func modReverse(json, arg string) string {
 			out = append(out, keyValues[i+1].Raw...)
 		}
 		out = append(out, '}')
-		return bytesString(out)
+		return out
 	}
 	return json
 }
@@ -3074,8 +3102,8 @@ func modReverse(json, arg string) string {
 //	[1,[2],[3,4],[5,[6,7]]] -> [1,2,3,4,5,6,7]
 //
 // The original json is returned when the json is not an array.
-func modFlatten(json, arg string) string {
-	res := Parse(json)
+func modFlatten(json []byte, arg string) []byte {
+	res := ParseBytes(json)
 	if !res.IsArray() {
 		return json
 	}
@@ -3095,12 +3123,12 @@ func modFlatten(json, arg string) string {
 		var raw string
 		if value.IsArray() {
 			if deep {
-				raw = unwrap(modFlatten(value.Raw, arg))
+				raw = string(unwrap(modFlatten(value.Raw, arg)))
 			} else {
-				raw = unwrap(value.Raw)
+				raw = string(unwrap(value.Raw))
 			}
 		} else {
-			raw = value.Raw
+			raw = string(value.Raw)
 		}
 		raw = strings.TrimSpace(raw)
 		if len(raw) > 0 {
@@ -3113,16 +3141,16 @@ func modFlatten(json, arg string) string {
 		return true
 	})
 	out = append(out, ']')
-	return bytesString(out)
+	return out
 }
 
 // @keys extracts the keys from an object.
 //
 //	{"first":"Tom","last":"Smith"} -> ["first","last"]
-func modKeys(json, arg string) string {
-	v := Parse(json)
+func modKeys(json []byte, arg string) []byte {
+	v := ParseBytes(json)
 	if !v.Exists() {
-		return "[]"
+		return []byte("[]")
 	}
 	obj := v.IsObject()
 	var out strings.Builder
@@ -3133,7 +3161,7 @@ func modKeys(json, arg string) string {
 			out.WriteByte(',')
 		}
 		if obj {
-			out.WriteString(key.Raw)
+			out.WriteString(string(key.Raw))
 		} else {
 			out.WriteString("null")
 		}
@@ -3141,16 +3169,16 @@ func modKeys(json, arg string) string {
 		return true
 	})
 	out.WriteByte(']')
-	return out.String()
+	return []byte(out.String())
 }
 
 // @values extracts the values from an object.
 //
 //	{"first":"Tom","last":"Smith"} -> ["Tom","Smith"]
-func modValues(json, arg string) string {
-	v := Parse(json)
+func modValues(json []byte, arg string) []byte {
+	v := ParseBytes(json)
 	if !v.Exists() {
-		return "[]"
+		return []byte("[]")
 	}
 	if v.IsArray() {
 		return json
@@ -3162,12 +3190,12 @@ func modValues(json, arg string) string {
 		if i > 0 {
 			out.WriteByte(',')
 		}
-		out.WriteString(value.Raw)
+		out.WriteString(string(value.Raw))
 		i++
 		return true
 	})
 	out.WriteByte(']')
-	return out.String()
+	return []byte(out.String())
 }
 
 // @join multiple objects into a single object.
@@ -3183,8 +3211,8 @@ func modValues(json, arg string) string {
 //	[{"first":"Tom","age":37},{"age":41}] -> {"first","Tom","age":41}
 //
 // The original json is returned when the json is not an object.
-func modJoin(json, arg string) string {
-	res := Parse(json)
+func modJoin(json []byte, arg string) []byte {
+	res := ParseBytes(json)
 	if !res.IsArray() {
 		return json
 	}
@@ -3241,14 +3269,14 @@ func modJoin(json, arg string) string {
 		}
 	}
 	out = append(out, '}')
-	return bytesString(out)
+	return out
 }
 
 // @valid ensures that the json is valid before moving on. An empty string is
 // returned when the json is not valid, otherwise it returns the original json.
-func modValid(json, arg string) string {
-	if !Valid(json) {
-		return ""
+func modValid(json []byte, arg string) []byte{
+	if !ValidBytes(json) {
+		return []byte{}
 	}
 	return json
 }
@@ -3256,24 +3284,24 @@ func modValid(json, arg string) string {
 // @fromstr converts a string to json
 //
 //	"{\"id\":1023,\"name\":\"alert\"}" -> {"id":1023,"name":"alert"}
-func modFromStr(json, arg string) string {
-	if !Valid(json) {
-		return ""
+func modFromStr(json []byte, arg string) []byte {
+	if !ValidBytes(json) {
+		return []byte{}
 	}
-	return Parse(json).String()
+	return []byte(ParseBytes(json).Str)
 }
 
 // @tostr converts a string to json
 //
 //	{"id":1023,"name":"alert"} -> "{\"id\":1023,\"name\":\"alert\"}"
-func modToStr(str, arg string) string {
-	return string(AppendJSONString(nil, str))
+func modToStr(str []byte, arg string) []byte {
+	return AppendJSONString(nil, string(str))
 }
 
-func modGroup(json, arg string) string {
-	res := Parse(json)
+func modGroup(json []byte, arg string) []byte{
+	res := ParseBytes(json)
 	if !res.IsObject() {
-		return ""
+		return []byte{}
 	}
 	var all [][]byte
 	res.ForEach(func(key, value Result) bool {
@@ -3285,7 +3313,10 @@ func modGroup(json, arg string) string {
 			if idx == len(all) {
 				all = append(all, []byte{})
 			}
-			all[idx] = append(all[idx], ("," + key.Raw + ":" + value.Raw)...)
+			all[idx] = append(all[idx], []byte(",")...)
+			all[idx] = append(all[idx], key.Raw...)
+			all[idx] = append(all[idx], []byte(":")...)
+			all[idx] = append(all[idx], value.Raw...)
 			idx++
 			return true
 		})
@@ -3302,7 +3333,7 @@ func modGroup(json, arg string) string {
 		data = append(data, '}')
 	}
 	data = append(data, ']')
-	return string(data)
+	return data
 }
 
 // stringHeader instead of reflect.StringHeader
@@ -3336,15 +3367,16 @@ func getBytes(json []byte, path string) Result {
 			// str is nil
 			if rawh.data == nil {
 				// raw is nil
-				result.Raw = ""
+				result.Raw = result.Raw[:0]
 			} else {
 				// raw has data, safely copy the slice header to a string
-				result.Raw = string(*(*[]byte)(unsafe.Pointer(&rawh)))
+				result.Raw = result.Raw[:0]
+				result.Raw = append(result.Raw, (*(*[]byte)(unsafe.Pointer(&rawh)))...)
 			}
 			result.Str = ""
 		} else if rawh.data == nil {
 			// raw is nil
-			result.Raw = ""
+			result.Raw = result.Raw[:0]
 			// str has data, safely copy the slice header to a string
 			result.Str = string(*(*[]byte)(unsafe.Pointer(&strh)))
 		} else if uintptr(strh.data) >= uintptr(rawh.data) &&
@@ -3353,12 +3385,14 @@ func getBytes(json []byte, path string) Result {
 			// Str is a substring of Raw.
 			start := uintptr(strh.data) - uintptr(rawh.data)
 			// safely copy the raw slice header
-			result.Raw = string(*(*[]byte)(unsafe.Pointer(&rawh)))
+			result.Raw = result.Raw[:0]
+			result.Raw = append(result.Raw, *(*[]byte)(unsafe.Pointer(&rawh))...)
 			// substring the raw
-			result.Str = result.Raw[start : start+uintptr(strh.len)]
+			result.Str = string(result.Raw[start : start+uintptr(strh.len)])
 		} else {
 			// safely copy both the raw and str slice headers to strings
-			result.Raw = string(*(*[]byte)(unsafe.Pointer(&rawh)))
+			result.Raw = result.Raw[:0]
+			result.Raw = append(result.Raw, *(*[]byte)(unsafe.Pointer(&rawh))...)
 			result.Str = string(*(*[]byte)(unsafe.Pointer(&strh)))
 		}
 	}
@@ -3368,11 +3402,9 @@ func getBytes(json []byte, path string) Result {
 // fillIndex finds the position of Raw data and assigns it to the Index field
 // of the resulting value. If the position cannot be found then Index zero is
 // used instead.
-func fillIndex(json string, c *parseContext) {
+func fillIndex(json []byte, c *parseContext) {
 	if len(c.value.Raw) > 0 && !c.calcd {
-		jhdr := *(*stringHeader)(unsafe.Pointer(&json))
-		rhdr := *(*stringHeader)(unsafe.Pointer(&(c.value.Raw)))
-		c.value.Index = int(uintptr(rhdr.data) - uintptr(jhdr.data))
+		c.value.Index = strings.Index(string(json), string(c.value.Raw))
 		if c.value.Index < 0 || c.value.Index >= len(json) {
 			c.value.Index = 0
 		}
@@ -3387,9 +3419,9 @@ func stringBytes(s string) []byte {
 	}))
 }
 
-func bytesString(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
-}
+// func bytesString(b []byte) string {
+// 	return *(*string)(unsafe.Pointer(&b))
+// }
 
 func revSquash(json string) string {
 	// reverse squash
@@ -3490,7 +3522,7 @@ func (t Result) Path(json string) string {
 		// JSON cannot safely contain Result.
 		goto fail
 	}
-	if !strings.HasPrefix(json[t.Index:], t.Raw) {
+	if !strings.HasPrefix(json[t.Index:], string(t.Raw)) {
 		// Result is not at the JSON index as expected.
 		goto fail
 	}
@@ -3617,8 +3649,8 @@ func parseRecursiveDescent(all []Result, parent Result, path string) []Result {
 	return all
 }
 
-func modDig(json, arg string) string {
-	all := parseRecursiveDescent(nil, Parse(json), arg)
+func modDig(json []byte, arg string) []byte {
+	all := parseRecursiveDescent(nil, ParseBytes(json), arg)
 	var out []byte
 	out = append(out, '[')
 	for i, res := range all {
@@ -3628,5 +3660,5 @@ func modDig(json, arg string) string {
 		out = append(out, res.Raw...)
 	}
 	out = append(out, ']')
-	return string(out)
+	return out
 }
