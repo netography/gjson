@@ -527,14 +527,14 @@ func (value *Result) Parse(json string) {
 			value.Type = String
 			value.Raw, value.Str = tostr(json[i:])
 		default:
-			return Result{}
+			value.Clear()
+			return
 		}
 		break
 	}
 	if value.Exists() {
 		value.Index = i
 	}
-	return value
 }
 
 // ParseBytes parses the json and returns a result.
