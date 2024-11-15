@@ -293,7 +293,7 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 		if !ok {
 			return
 		}
-		if t.Indexes != nil {
+		if len(t.Indexes) > 0 {
 			if idx < len(t.Indexes) {
 				value.Index = t.Indexes[idx]
 			}
@@ -321,7 +321,7 @@ func (t Result) Map() map[string]Result {
 // The result should be a JSON array or object.
 func (t Result) Get(path string) Result {
 	r := Get(t.Raw, path)
-	if r.Indexes != nil {
+	if len(r.Indexes) > 0 {
 		for i := 0; i < len(r.Indexes); i++ {
 			r.Indexes[i] += t.Index
 		}
@@ -447,7 +447,7 @@ func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
 		}
 	}
 end:
-	if t.Indexes != nil {
+	if len(t.Indexes) > 0 {
 		if len(t.Indexes) != len(r.a) {
 			for i := 0; i < len(r.a); i++ {
 				r.a[i].Index = 0
@@ -3454,7 +3454,7 @@ func revSquash(json string) string {
 // when the Result came from a path that contained a multipath, modifier,
 // or a nested query.
 func (t Result) Paths(json string) []string {
-	if t.Indexes == nil {
+	if len(t.Indexes) == 0 {
 		return nil
 	}
 	paths := make([]string, 0, len(t.Indexes))
