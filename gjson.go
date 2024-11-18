@@ -321,15 +321,47 @@ func (t *Result) Map() map[string]*Result {
 // Get searches result for the specified path.
 // The result should be a JSON array or object.
 func (t *Result) Get(path string) *Result {
-	r := Get(t.Raw, path)
-	if len(r.Indexes) > 0 {
-		for i := 0; i < len(r.Indexes); i++ {
-			r.Indexes[i] += t.Index
+	if len(path) > 1 {
+		res, ok := t.getDeepPath(path)
+		if ok {
+			return res
+		}
+	}
+	var i int
+	c := parseContext{value: &Result{}}
+	c.json = t.Raw
+	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
+		c.lines = true
+		parseArray(&c, 0, path[2:])
+	} else {
+		for ; i < len(c.json); i++ {
+			if c.json[i] == '{' {
+				i++
+				parseObject(&c, i, path)
+				break
+			}
+			if c.json[i] == '[' {
+				i++
+				parseArray(&c, i, path)
+				break
+			}
+		}
+	}
+	if c.piped {
+		res := c.value.Get(c.pipe)
+		res.Index = 0
+		return res
+	}
+	fillIndex(t.Raw, &c)
+
+	if len(c.value.Indexes) > 0 {
+		for i := 0; i < len(c.value.Indexes); i++ {
+			c.value.Indexes[i] += t.Index
 		}
 	} else {
-		r.Index += t.Index
+		c.value.Index += t.Index
 	}
-	return r
+	return c.value
 }
 
 type arrayOrMapResult struct {
@@ -2122,15 +2154,15 @@ type parseContext struct {
 	lines bool
 }
 
-func getDeepPathModifiers(json, path string) *Result {
+func (t *Result) getDeepPathModifiers(path string) (*Result, bool) {
 	// possible modifier
 	var ok bool
 	var npath string
 	var rjson string
 	if path[0] == '@' && !DisableModifiers {
-		npath, rjson, ok = execModifier(json, path)
+		npath, rjson, ok = execModifier(t.Raw, path)
 	} else if path[0] == '!' {
-		npath, rjson, ok = execStatic(json, path)
+		npath, rjson, ok = execStatic(t.Raw, path)
 	}
 	if ok {
 		path = npath
@@ -2138,14 +2170,14 @@ func getDeepPathModifiers(json, path string) *Result {
 			res := Get(rjson, path[1:])
 			res.Index = 0
 			res.Indexes = nil
-			return res
+			return res, true
 		}
-		return Parse(rjson)
+		return Parse(rjson), true
 	}
-	return nil
+	return nil, false
 }
 
-func getObjOrArray(json, path string) *Result {
+func (t *Result) getObjOrArray(path string) (*Result, bool) {
 	// using a subselector path
 	kind := path[0]
 	var ok bool
@@ -2157,7 +2189,7 @@ func getObjOrArray(json, path string) *Result {
 			b = append(b, kind)
 			var i int
 			for _, sub := range subs {
-				res := Get(json, sub.path)
+				res := t.Get(sub.path)
 				if res.Exists() {
 					if i > 0 {
 						b = append(b, ',')
@@ -2200,21 +2232,27 @@ func getObjOrArray(json, path string) *Result {
 				res = res.Get(path[1:])
 			}
 			res.Index = 0
-			return res
+			return res, true
 		}
 	}
-	return nil
+	return t, false
 }
 
 // added for profiling
-func getDeepPath(json, path string) *Result {
+func (t *Result) getDeepPath(path string) (*Result, bool) {
 	if (path[0] == '@' && !DisableModifiers) || path[0] == '!' {
-		return getDeepPathModifiers(json, path)
+		res, ok := t.getDeepPathModifiers(path)
+		if ok {
+			return res, true
+		}
 	}
 	if path[0] == '[' || path[0] == '{' {
-		return getObjOrArray(json, path)
+		res, ok := t.getObjOrArray(path) 
+		if ok {
+			return res, true
+		}
 	}
-	return nil
+	return t, false
 }
 
 // Get searches json for the specified path.
@@ -2252,8 +2290,9 @@ func getDeepPath(json, path string) *Result {
 // use the Valid function first.
 func Get(json, path string) *Result {
 	if len(path) > 1 {
-		res := getDeepPath(json, path)
-		if res != nil {
+		res := &Result{Raw: json}
+		res, ok := res.getDeepPath(path) 
+		if ok {
 			return res
 		}
 	}
