@@ -10,7 +10,6 @@ package gjson
 import (
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -1536,34 +1535,6 @@ func queryMatches(rp *arrayPathResult, value *Result) bool {
 	return false
 }
 
-var contextPool = sync.Pool {
-	New: func() any {
-		return &parseContext{
-			value: &Result{}, // TODO: pool this too?
-		}
-	},
-}
-
-func (p *parseContext) Clear() {
-	p.calcd = false
-	p.json = ""
-	p.value = nil
-	p.pipe = ""
-	p.piped = false
-	p.lines = false
-}
-
-func newParseContext() *parseContext {
-	p, ok := contextPool.Get().(*parseContext)
-	if !ok {
-		return &parseContext{
-			value: &Result{},
-		}
-	}
-	p.value = &Result{}
-	return p
-}
-
 func parseArray(c *parseContext, i int, path string) (int, bool) {
 	var pmatch, vesc, ok, hit bool
 	var val string
@@ -1592,13 +1563,9 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				multires = append(multires, '[')
 			}
 		}
-		tmp := newParseContext()
-		defer func() {
-			tmp.Clear()
-			contextPool.Put(tmp)
-		}()
+		tmp := parseContext{value: &Result{}}
 		*tmp.value = *qval
-		fillIndex(c.json, tmp)
+		fillIndex(c.json, &tmp)
 		parentIndex := tmp.value.Index
 		res := &Result{}
 		if qval.Type == JSON {
@@ -2272,25 +2239,21 @@ func Get(json, path string) *Result {
 		}
 	}
 	var i int
-	c := newParseContext()
-	defer func() {
-		c.Clear()
-		contextPool.Put(c)
-	}()
+	c := parseContext{value: &Result{}}
 	c.json = json
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
-		parseArray(c, 0, path[2:])
+		parseArray(&c, 0, path[2:])
 	} else {
 		for ; i < len(c.json); i++ {
 			if c.json[i] == '{' {
 				i++
-				parseObject(c, i, path)
+				parseObject(&c, i, path)
 				break
 			}
 			if c.json[i] == '[' {
 				i++
-				parseArray(c, i, path)
+				parseArray(&c, i, path)
 				break
 			}
 		}
@@ -2300,7 +2263,7 @@ func Get(json, path string) *Result {
 		res.Index = 0
 		return res
 	}
-	fillIndex(json, c)
+	fillIndex(json, &c)
 	return c.value
 }
 
@@ -2450,13 +2413,9 @@ func parseAny(json string, i int, hit bool) (int, *Result, bool) {
 				res.Type = JSON
 			}
 			return func() (int, *Result, bool) {
-				tmp := newParseContext()
-				defer func() {
-					tmp.Clear()
-					contextPool.Put(tmp)
-				}()
+				tmp := parseContext{value: &Result{}}
 				*tmp.value = res
-				fillIndex(json, tmp)
+				fillIndex(json, &tmp)
 				return i, tmp.value, true
 			}()
 		}
