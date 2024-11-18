@@ -231,12 +231,12 @@ func (t *Result) IsBool() bool {
 // value of each item. If the result is an Array, the iterator will only pass
 // the value of each item. If the result is not a JSON array or object, the
 // iterator will pass back one value equal to the result.
-func (t *Result) ForEach(iterator func(key, value *Result) bool) {
+func (t *Result) ForEach(iterator func(key Result, value *Result) bool) {
 	if !t.Exists() {
 		return
 	}
 	if t.Type != JSON {
-		iterator(&Result{}, t)
+		iterator(Result{}, t)
 		return
 	}
 	json := t.Raw
@@ -265,8 +265,6 @@ func (t *Result) ForEach(iterator func(key, value *Result) bool) {
 	var ok bool
 	var idx int
 	for ; i < len(json); i++ {
-		iKey := &Result{}
-		*iKey = key
 		if obj {
 			if json[i] != '"' {
 				continue
@@ -277,16 +275,14 @@ func (t *Result) ForEach(iterator func(key, value *Result) bool) {
 				return
 			}
 			if vesc {
-				iKey.Str = unescape(str[1 : len(str)-1])
+				key.Str = unescape(str[1 : len(str)-1])
 			} else {
-				iKey.Str = str[1 : len(str)-1]
+				key.Str = str[1 : len(str)-1]
 			}
-			iKey.Raw = str
-			iKey.Index = s + t.Index
+			key.Raw = str
 			key.Index = s + t.Index
 		} else {
 			key.Num += 1
-			iKey.Num += 1
 		}
 		for ; i < len(json); i++ {
 			if json[i] <= ' ' || json[i] == ',' || json[i] == ':' {
@@ -306,7 +302,7 @@ func (t *Result) ForEach(iterator func(key, value *Result) bool) {
 		} else {
 			value.Index = s + t.Index
 		}
-		if !iterator(iKey, value) {
+		if !iterator(key, value) {
 			return
 		}
 		idx++
@@ -3058,7 +3054,7 @@ func cleanWS(s string) string {
 func modPretty(json, arg string) string {
 	if len(arg) > 0 {
 		opts := *pretty.DefaultOptions
-		Parse(arg).ForEach(func(key, value *Result) bool {
+		Parse(arg).ForEach(func(key Result, value *Result) bool {
 			switch key.String() {
 			case "sortKeys":
 				opts.SortKeys = value.Bool()
@@ -3091,7 +3087,7 @@ func modReverse(json, arg string) string {
 	res := Parse(json)
 	if res.IsArray() {
 		var values []*Result
-		res.ForEach(func(_, value *Result) bool {
+		res.ForEach(func(_ Result, value *Result) bool {
 			values = append(values, value)
 			return true
 		})
@@ -3108,8 +3104,10 @@ func modReverse(json, arg string) string {
 	}
 	if res.IsObject() {
 		var keyValues []*Result
-		res.ForEach(func(key, value *Result) bool {
-			keyValues = append(keyValues, key, value)
+		res.ForEach(func(key Result, value *Result) bool {
+			k := &Result{}
+			*k = key
+			keyValues = append(keyValues, k, value)
 			return true
 		})
 		out := make([]byte, 0, len(json))
@@ -3144,7 +3142,7 @@ func modFlatten(json, arg string) string {
 	}
 	var deep bool
 	if arg != "" {
-		Parse(arg).ForEach(func(key, value *Result) bool {
+		Parse(arg).ForEach(func(key Result, value *Result) bool {
 			if key.String() == "deep" {
 				deep = value.Bool()
 			}
@@ -3154,7 +3152,7 @@ func modFlatten(json, arg string) string {
 	var out []byte
 	out = append(out, '[')
 	var idx int
-	res.ForEach(func(_, value *Result) bool {
+	res.ForEach(func(_ Result, value *Result) bool {
 		var raw string
 		if value.IsArray() {
 			if deep {
@@ -3191,7 +3189,7 @@ func modKeys(json, arg string) string {
 	var out strings.Builder
 	out.WriteByte('[')
 	var i int
-	v.ForEach(func(key, _ *Result) bool {
+	v.ForEach(func(key Result, _ *Result) bool {
 		if i > 0 {
 			out.WriteByte(',')
 		}
@@ -3221,7 +3219,7 @@ func modValues(json, arg string) string {
 	var out strings.Builder
 	out.WriteByte('[')
 	var i int
-	v.ForEach(func(_, value *Result) bool {
+	v.ForEach(func(_ Result, value *Result) bool {
 		if i > 0 {
 			out.WriteByte(',')
 		}
@@ -3253,7 +3251,7 @@ func modJoin(json, arg string) string {
 	}
 	var preserve bool
 	if arg != "" {
-		Parse(arg).ForEach(func(key, value *Result) bool {
+		Parse(arg).ForEach(func(key Result, value *Result) bool {
 			if key.String() == "preserve" {
 				preserve = value.Bool()
 			}
@@ -3265,7 +3263,7 @@ func modJoin(json, arg string) string {
 	if preserve {
 		// Preserve duplicate keys.
 		var idx int
-		res.ForEach(func(_, value *Result) bool {
+		res.ForEach(func(_ Result, value *Result) bool {
 			if !value.IsObject() {
 				return true
 			}
@@ -3280,14 +3278,16 @@ func modJoin(json, arg string) string {
 		// Deduplicate keys and generate an object with stable ordering.
 		var keys []*Result
 		kvals := make(map[string]*Result)
-		res.ForEach(func(_, value *Result) bool {
+		res.ForEach(func(_ Result, value *Result) bool {
 			if !value.IsObject() {
 				return true
 			}
-			value.ForEach(func(key, value *Result) bool {
+			value.ForEach(func(key Result, value *Result) bool {
 				k := key.String()
 				if _, ok := kvals[k]; !ok {
-					keys = append(keys, key)
+					kk := &Result{}
+					*kk = key
+					keys = append(keys, kk)
 				}
 				kvals[k] = value
 				return true
@@ -3339,12 +3339,12 @@ func modGroup(json, arg string) string {
 		return ""
 	}
 	var all [][]byte
-	res.ForEach(func(key, value *Result) bool {
+	res.ForEach(func(key Result, value *Result) bool {
 		if !value.IsArray() {
 			return true
 		}
 		var idx int
-		value.ForEach(func(_, value *Result) bool {
+		value.ForEach(func(_ Result, value *Result) bool {
 			if idx == len(all) {
 				all = append(all, []byte{})
 			}
@@ -3521,7 +3521,7 @@ func (t *Result) Paths(json string) []string {
 		return nil
 	}
 	paths := make([]string, 0, len(t.Indexes))
-	t.ForEach(func(_, value *Result) bool {
+	t.ForEach(func(_ Result, value *Result) bool {
 		paths = append(paths, value.Path(json))
 		return true
 	})
@@ -3672,7 +3672,7 @@ func parseRecursiveDescent(all []*Result, parent *Result, path string) []*Result
 		all = append(all, res)
 	}
 	if parent.IsArray() || parent.IsObject() {
-		parent.ForEach(func(_, val *Result) bool {
+		parent.ForEach(func(_ Result, val *Result) bool {
 			all = parseRecursiveDescent(all, val, path)
 			return true
 		})

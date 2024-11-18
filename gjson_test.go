@@ -162,7 +162,7 @@ func TestPath(t *testing.T) {
 	}
 
 	obj := Parse(json)
-	obj.ForEach(func(key, val *Result) bool {
+	obj.ForEach(func(key Result, val *Result) bool {
 		kp := key.Path(json)
 		assert(t, kp == "")
 		vp := val.Path(json)
@@ -175,7 +175,7 @@ func TestPath(t *testing.T) {
 		return true
 	})
 	arr := obj.Get("loggy.programmers")
-	arr.ForEach(func(_, val *Result) bool {
+	arr.ForEach(func(_ Result, val *Result) bool {
 		vp := val.Path(json)
 		val2 := Get(json, vp)
 		assert(t, val2.Raw == val.Raw)
@@ -415,7 +415,7 @@ func TestTypes(t *testing.T) {
 
 func TestForEach(t *testing.T) {
 	(&Result{}).ForEach(nil)
-	(&Result{Type: String, Str: "Hello"}).ForEach(func(_, value *Result) bool {
+	(&Result{Type: String, Str: "Hello"}).ForEach(func(_ Result, value *Result) bool {
 		assert(t, value.String() == "Hello")
 		return false
 	})
@@ -424,7 +424,7 @@ func TestForEach(t *testing.T) {
 	json := ` {"name": {"first": "Janet","last": "Prichard"},
 	"asd\nf":"\ud83d\udd13","age": 47}`
 	var count int
-	ParseBytes([]byte(json)).ForEach(func(key, value *Result) bool {
+	ParseBytes([]byte(json)).ForEach(func(key Result, value *Result) bool {
 		count++
 		return true
 	})
@@ -445,7 +445,7 @@ func TestMap(t *testing.T) {
 func TestBasic1(t *testing.T) {
 	mtok := get(basicJSON, `loggy.programmers`)
 	var count int
-	mtok.ForEach(func(key, value *Result) bool {
+	mtok.ForEach(func(key Result, value *Result) bool {
 		assert(t, key.Exists())
 		assert(t, key.String() == fmt.Sprint(count))
 		assert(t, key.Int() == int64(count))
@@ -455,7 +455,7 @@ func TestBasic1(t *testing.T) {
 		}
 		if count == 1 {
 			i := 0
-			value.ForEach(func(key, value *Result) bool {
+			value.ForEach(func(key Result, value *Result) bool {
 				switch i {
 				case 0:
 					if key.String() != "firstName" ||
@@ -2392,7 +2392,7 @@ func TestNaNInf(t *testing.T) {
 	}
 
 	var i int
-	Parse(json).ForEach(func(_, r *Result) bool {
+	Parse(json).ForEach(func(_ Result, r *Result) bool {
 		assert(t, r.Raw == raws[i])
 		assert(t, r.Num == nums[i] || (math.IsNaN(r.Num) && math.IsNaN(nums[i])))
 		assert(t, r.Type == Number)
@@ -2534,7 +2534,7 @@ func TestArrayKeys(t *testing.T) {
 	}
 	json += "]"
 	var i int
-	Parse(json).ForEach(func(key, value *Result) bool {
+	Parse(json).ForEach(func(key Result, value *Result) bool {
 		assert(t, key.String() == fmt.Sprint(i))
 		assert(t, key.Int() == int64(i))
 		i++
