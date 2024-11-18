@@ -2167,7 +2167,7 @@ func (t *Result) getDeepPathModifiers(path string) (*Result, bool) {
 	if ok {
 		path = npath
 		if len(path) > 0 && (path[0] == '|' || path[0] == '.') {
-			res := Get(rjson, path[1:])
+			res := (&Result{Raw: rjson}).Get(path[1:])
 			res.Index = 0
 			res.Indexes = nil
 			return res, true
