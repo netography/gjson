@@ -10,6 +10,7 @@ package gjson
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -1539,10 +1540,32 @@ func queryMatches(rp *arrayPathResult, value *Result) bool {
 	return false
 }
 
+var contextPool = sync.Pool {
+	New: func() any {
+		return &parseContext{
+			value: &Result{}, // TODO: pool this too?
+		}
+	},
+}
+
+func (p *parseContext) Clear() {
+	p.calcd = false
+	p.json = ""
+	p.value = nil
+	p.pipe = ""
+	p.piped = false
+	p.lines = false
+}
+
 func newParseContext() *parseContext {
-	return &parseContext{
-		value: &Result{},
+	p, ok := contextPool.Get().(*parseContext)
+	if !ok {
+		return &parseContext{
+			value: &Result{},
+		}
 	}
+	p.value = &Result{}
+	return p
 }
 
 func parseArray(c *parseContext, i int, path string) (int, bool) {
@@ -1574,6 +1597,10 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 			}
 		}
 		tmp := newParseContext()
+		defer func() {
+			tmp.Clear()
+			contextPool.Put(tmp)
+		}()
 		*tmp.value = *qval
 		fillIndex(c.json, tmp)
 		parentIndex := tmp.value.Index
@@ -1611,7 +1638,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					queryIndexes = append(queryIndexes, res.Index+parentIndex)
 				}
 			} else {
-				c.value = res
+				*c.value = *res
 				return true
 			}
 		}
@@ -1814,16 +1841,14 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				}
 				if !c.value.Exists() {
 					if len(multires) > 0 {
-						c.value = &Result{
-							Raw:     string(append(multires, ']')),
-							Type:    JSON,
-							Indexes: queryIndexes,
-						}
+						c.value.Clear()
+						c.value.Raw = string(append(multires, ']'))
+						c.value.Type = JSON
+						c.value.Indexes = queryIndexes
 					} else if rp.query.all {
-						c.value = &Result{
-							Raw:  "[]",
-							Type: JSON,
-						}
+						c.value.Clear()
+						c.value.Raw="[]"
+						c.value.Type=JSON
 					}
 				}
 				return i + 1, false
@@ -2251,7 +2276,12 @@ func Get(json, path string) *Result {
 		}
 	}
 	var i int
-	c := &parseContext{json: json, value: &Result{}}
+	c := newParseContext()
+	defer func() {
+		c.Clear()
+		contextPool.Put(c)
+	}()
+	c.json = json
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
 		parseArray(c, 0, path[2:])
@@ -2423,10 +2453,16 @@ func parseAny(json string, i int, hit bool) (int, *Result, bool) {
 				res.Raw = val
 				res.Type = JSON
 			}
-			tmp := newParseContext()
-			tmp.value = &res
-			fillIndex(json, tmp)
-			return i, tmp.value, true
+			return func() (int, *Result, bool) {
+				tmp := newParseContext()
+				defer func() {
+					tmp.Clear()
+					contextPool.Put(tmp)
+				}()
+				*tmp.value = res
+				fillIndex(json, tmp)
+				return i, tmp.value, true
+			}()
 		}
 		if json[i] <= ' ' {
 			continue
@@ -2864,7 +2900,7 @@ func safeInt(f float64) (n int64, ok bool) {
 
 // execStatic parses the path to find a static value.
 // The input expects that the path already starts with a '!'
-func execStatic(json, path string) (pathOut, res string, ok bool) {
+func execStatic(_ string, path string) (pathOut, res string, ok bool) {
 	name := path[1:]
 	if len(name) > 0 {
 		switch name[0] {
