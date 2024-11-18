@@ -153,7 +153,7 @@ result.Time() time.Time
 result.Array() []gjson.Result
 result.Map() map[string]gjson.Result
 result.Get(path string) Result
-result.ForEach(iterator func(key, value Result) bool)
+result.ForEach(iterator func(key, value *Result) bool)
 result.Less(token Result, caseSensitive bool) bool
 ```
 

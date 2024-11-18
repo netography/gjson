@@ -75,7 +75,7 @@ type Result struct {
 }
 
 // String returns a string representation of the value.
-func (t Result) String() string {
+func (t *Result) String() string {
 	switch t.Type {
 	default:
 		return ""
@@ -106,7 +106,7 @@ func (t Result) String() string {
 }
 
 // Bool returns an boolean representation.
-func (t Result) Bool() bool {
+func (t *Result) Bool() bool {
 	switch t.Type {
 	default:
 		return false
@@ -121,7 +121,7 @@ func (t Result) Bool() bool {
 }
 
 // Int returns an integer representation.
-func (t Result) Int() int64 {
+func (t *Result) Int() int64 {
 	switch t.Type {
 	default:
 		return 0
@@ -147,7 +147,7 @@ func (t Result) Int() int64 {
 }
 
 // Uint returns an unsigned integer representation.
-func (t Result) Uint() uint64 {
+func (t *Result) Uint() uint64 {
 	switch t.Type {
 	default:
 		return 0
@@ -173,7 +173,7 @@ func (t Result) Uint() uint64 {
 }
 
 // Float returns an float64 representation.
-func (t Result) Float() float64 {
+func (t *Result) Float() float64 {
 	switch t.Type {
 	default:
 		return 0
@@ -188,7 +188,7 @@ func (t Result) Float() float64 {
 }
 
 // Time returns a time.Time representation.
-func (t Result) Time() time.Time {
+func (t *Result) Time() time.Time {
 	res, _ := time.Parse(time.RFC3339, t.String())
 	return res
 }
@@ -198,29 +198,29 @@ func (t Result) Time() time.Time {
 // array will be returned.
 // If the result is not a JSON array, the return value will be an
 // array containing one result.
-func (t Result) Array() []Result {
+func (t *Result) Array() []*Result {
 	if t.Type == Null {
-		return []Result{}
+		return []*Result{}
 	}
 	if !t.IsArray() {
-		return []Result{t}
+		return []*Result{t}
 	}
 	r := t.arrayOrMap('[', false)
 	return r.a
 }
 
 // IsObject returns true if the result value is a JSON object.
-func (t Result) IsObject() bool {
+func (t *Result) IsObject() bool {
 	return t.Type == JSON && len(t.Raw) > 0 && t.Raw[0] == '{'
 }
 
 // IsArray returns true if the result value is a JSON array.
-func (t Result) IsArray() bool {
+func (t *Result) IsArray() bool {
 	return t.Type == JSON && len(t.Raw) > 0 && t.Raw[0] == '['
 }
 
 // IsBool returns true if the result value is a JSON boolean.
-func (t Result) IsBool() bool {
+func (t *Result) IsBool() bool {
 	return t.Type == True || t.Type == False
 }
 
@@ -230,18 +230,19 @@ func (t Result) IsBool() bool {
 // value of each item. If the result is an Array, the iterator will only pass
 // the value of each item. If the result is not a JSON array or object, the
 // iterator will pass back one value equal to the result.
-func (t Result) ForEach(iterator func(key, value Result) bool) {
+func (t *Result) ForEach(iterator func(key, value *Result) bool) {
 	if !t.Exists() {
 		return
 	}
 	if t.Type != JSON {
-		iterator(Result{}, t)
+		iterator(&Result{}, t)
 		return
 	}
 	json := t.Raw
 	var obj bool
 	var i int
-	var key, value Result
+	var value *Result
+	var key Result
 	for ; i < len(json); i++ {
 		if json[i] == '{' {
 			i++
@@ -263,6 +264,8 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 	var ok bool
 	var idx int
 	for ; i < len(json); i++ {
+		iKey := &Result{}
+		*iKey = key
 		if obj {
 			if json[i] != '"' {
 				continue
@@ -273,14 +276,16 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 				return
 			}
 			if vesc {
-				key.Str = unescape(str[1 : len(str)-1])
+				iKey.Str = unescape(str[1 : len(str)-1])
 			} else {
-				key.Str = str[1 : len(str)-1]
+				iKey.Str = str[1 : len(str)-1]
 			}
-			key.Raw = str
+			iKey.Raw = str
+			iKey.Index = s + t.Index
 			key.Index = s + t.Index
 		} else {
 			key.Num += 1
+			iKey.Num += 1
 		}
 		for ; i < len(json); i++ {
 			if json[i] <= ' ' || json[i] == ',' || json[i] == ':' {
@@ -300,7 +305,7 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 		} else {
 			value.Index = s + t.Index
 		}
-		if !iterator(key, value) {
+		if !iterator(iKey, value) {
 			return
 		}
 		idx++
@@ -309,9 +314,9 @@ func (t Result) ForEach(iterator func(key, value Result) bool) {
 
 // Map returns back a map of values. The result should be a JSON object.
 // If the result is not a JSON object, the return value will be an empty map.
-func (t Result) Map() map[string]Result {
+func (t *Result) Map() map[string]*Result {
 	if t.Type != JSON {
-		return map[string]Result{}
+		return map[string]*Result{}
 	}
 	r := t.arrayOrMap('{', false)
 	return r.o
@@ -319,7 +324,7 @@ func (t Result) Map() map[string]Result {
 
 // Get searches result for the specified path.
 // The result should be a JSON array or object.
-func (t Result) Get(path string) Result {
+func (t *Result) Get(path string) *Result {
 	r := Get(t.Raw, path)
 	if len(r.Indexes) > 0 {
 		for i := 0; i < len(r.Indexes); i++ {
@@ -332,17 +337,17 @@ func (t Result) Get(path string) Result {
 }
 
 type arrayOrMapResult struct {
-	a  []Result
+	a  []*Result
 	ai []interface{}
-	o  map[string]Result
+	o  map[string]*Result
 	oi map[string]interface{}
 	vc byte
 }
 
-func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
-	var json = t.Raw
+func (t *Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
+	json := t.Raw
 	var i int
-	var value Result
+	var value *Result
 	var count int
 	var key Result
 	if vc == 0 {
@@ -372,15 +377,16 @@ func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
 		if valueize {
 			r.oi = make(map[string]interface{})
 		} else {
-			r.o = make(map[string]Result)
+			r.o = make(map[string]*Result)
 		}
 	} else {
 		if valueize {
 			r.ai = make([]interface{}, 0)
 		} else {
-			r.a = make([]Result, 0)
+			r.a = make([]*Result, 0)
 		}
 	}
+	value = &Result{}
 	for ; i < len(json); i++ {
 		if json[i] <= ' ' {
 			continue
@@ -425,15 +431,17 @@ func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
 
 		if r.vc == '{' {
 			if count%2 == 0 {
-				key = value
+				key = *value
 			} else {
 				if valueize {
 					if _, ok := r.oi[key.Str]; !ok {
 						r.oi[key.Str] = value.Value()
+						value = &Result{}
 					}
 				} else {
 					if _, ok := r.o[key.Str]; !ok {
 						r.o[key.Str] = value
+						value = &Result{}
 					}
 				}
 			}
@@ -441,8 +449,10 @@ func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
 		} else {
 			if valueize {
 				r.ai = append(r.ai, value.Value())
+				value = &Result{}
 			} else {
 				r.a = append(r.a, value)
+				value = &Result{}
 			}
 		}
 	}
@@ -467,10 +477,10 @@ end:
 // Invalid json will not panic, but it may return back unexpected results.
 // If you are consuming JSON from an unpredictable source then you may want to
 // use the Valid function first.
-func Parse(json string) Result {
+func Parse(json string) *Result {
 	var value Result
 	value.Parse(json)
-	return value
+	return &value
 }
 
 // Clear for pooling
@@ -539,8 +549,10 @@ func (value *Result) Parse(json string) {
 
 // ParseBytes parses the json and returns a result.
 // If working with bytes, this method preferred over Parse(string(data))
-func ParseBytes(json []byte) Result {
-	return Parse(string(json))
+func ParseBytes(json []byte) *Result {
+	var value Result
+	value.ParseBytes(json)
+	return &value
 }
 
 func squash(json string) string {
@@ -677,7 +689,7 @@ func tostr(json string) (raw string, str string) {
 //	 if gjson.Get(json, "name.last").Exists(){
 //			println("value exists")
 //	 }
-func (t Result) Exists() bool {
+func (t *Result) Exists() bool {
 	return t.Type != Null || len(t.Raw) != 0
 }
 
@@ -690,7 +702,7 @@ func (t Result) Exists() bool {
 //	nil, for JSON null
 //	map[string]interface{}, for JSON objects
 //	[]interface{}, for JSON arrays
-func (t Result) Value() interface{} {
+func (t *Result) Value() interface{} {
 	if t.Type == String {
 		return t.Str
 	}
@@ -715,7 +727,7 @@ func (t Result) Value() interface{} {
 }
 
 func parseString(json string, i int) (int, string, bool, bool) {
-	var s = i
+	s := i
 	for ; i < len(json); i++ {
 		if json[i] > '\\' {
 			continue
@@ -753,7 +765,7 @@ func parseString(json string, i int) (int, string, bool, bool) {
 }
 
 func parseNumber(json string, i int) (int, string) {
-	var s = i
+	s := i
 	i++
 	for ; i < len(json); i++ {
 		if json[i] <= ' ' || json[i] == ',' || json[i] == ']' ||
@@ -765,7 +777,7 @@ func parseNumber(json string, i int) (int, string) {
 }
 
 func parseLiteral(json string, i int) (int, string) {
-	var s = i
+	s := i
 	i++
 	for ; i < len(json); i++ {
 		if json[i] < 'a' || json[i] > 'z' {
@@ -822,8 +834,7 @@ func parseArrayPath(path string) (r arrayPathResult) {
 				} else if path[1] == '[' || path[1] == '(' {
 					// query
 					r.query.on = true
-					qpath, op, value, _, fi, vesc, ok :=
-						parseQuery(path[i:])
+					qpath, op, value, _, fi, vesc, ok := parseQuery(path[i:])
 					if !ok {
 						// bad query, end now
 						break
@@ -1230,7 +1241,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				// this is slightly different from getting s string value
 				// because we don't need the outer quotes.
 				i++
-				var s = i
+				s := i
 				for ; i < len(c.json); i++ {
 					if c.json[i] > '\\' {
 						continue
@@ -1386,7 +1397,7 @@ func matchLimit(str, pattern string) bool {
 	return matched
 }
 
-func falseish(t Result) bool {
+func falseish(t *Result) bool {
 	switch t.Type {
 	case Null:
 		return true
@@ -1405,7 +1416,7 @@ func falseish(t Result) bool {
 	}
 }
 
-func trueish(t Result) bool {
+func trueish(t *Result) bool {
 	switch t.Type {
 	case True:
 		return true
@@ -1422,11 +1433,11 @@ func trueish(t Result) bool {
 	}
 }
 
-func nullish(t Result) bool {
+func nullish(t *Result) bool {
 	return t.Type == Null
 }
 
-func queryMatches(rp *arrayPathResult, value Result) bool {
+func queryMatches(rp *arrayPathResult, value *Result) bool {
 	rpv := rp.query.value
 	if len(rpv) > 0 {
 		if rpv[0] == '~' {
@@ -1446,13 +1457,13 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 			if ok {
 				rpv = "true"
 				if ish {
-					value = Result{Type: True}
+					value = &Result{Type: True}
 				} else {
-					value = Result{Type: False}
+					value = &Result{Type: False}
 				}
 			} else {
 				rpv = ""
-				value = Result{}
+				value = &Result{}
 			}
 		}
 	}
@@ -1527,6 +1538,13 @@ func queryMatches(rp *arrayPathResult, value Result) bool {
 	}
 	return false
 }
+
+func newParseContext() *parseContext {
+	return &parseContext{
+		value: &Result{},
+	}
+}
+
 func parseArray(c *parseContext, i int, path string) (int, bool) {
 	var pmatch, vesc, ok, hit bool
 	var val string
@@ -1549,24 +1567,24 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 		c.piped = true
 	}
 
-	procQuery := func(qval Result) bool {
+	procQuery := func(qval *Result) bool {
 		if rp.query.all {
 			if len(multires) == 0 {
 				multires = append(multires, '[')
 			}
 		}
-		var tmp parseContext
-		tmp.value = qval
-		fillIndex(c.json, &tmp)
+		tmp := newParseContext()
+		*tmp.value = *qval
+		fillIndex(c.json, tmp)
 		parentIndex := tmp.value.Index
-		var res Result
+		res := &Result{}
 		if qval.Type == JSON {
 			res = qval.Get(rp.query.path)
 		} else {
 			if rp.query.path != "" {
 				return false
 			}
-			res = qval
+			*res = *qval
 		}
 		if queryMatches(&rp, res) {
 			if rp.more {
@@ -1636,7 +1654,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					}
 					qval.Raw = val
 					qval.Type = String
-					if procQuery(qval) {
+					if procQuery(&qval) {
 						return i, true
 					}
 				} else if hit {
@@ -1664,7 +1682,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				} else {
 					i, val = parseSquash(c.json, i)
 					if rp.query.on {
-						if procQuery(Result{Raw: val, Type: JSON}) {
+						if procQuery(&Result{Raw: val, Type: JSON}) {
 							return i, true
 						}
 					} else if hit {
@@ -1688,7 +1706,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				} else {
 					i, val = parseSquash(c.json, i)
 					if rp.query.on {
-						if procQuery(Result{Raw: val, Type: JSON}) {
+						if procQuery(&Result{Raw: val, Type: JSON}) {
 							return i, true
 						}
 					} else if hit {
@@ -1718,7 +1736,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					case 'f':
 						qval.Type = False
 					}
-					if procQuery(qval) {
+					if procQuery(&qval) {
 						return i, true
 					}
 				} else if hit {
@@ -1746,8 +1764,8 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 							c.pipe = right
 							c.piped = true
 						}
-						var indexes = make([]int, 0, 64)
-						var jsons = make([]byte, 0, 64)
+						indexes := make([]int, 0, 64)
+						jsons := make([]byte, 0, 64)
 						jsons = append(jsons, '[')
 						for j, k := 0, 0; j < len(alog); j++ {
 							idx := alog[j]
@@ -1796,13 +1814,13 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				}
 				if !c.value.Exists() {
 					if len(multires) > 0 {
-						c.value = Result{
+						c.value = &Result{
 							Raw:     string(append(multires, ']')),
 							Type:    JSON,
 							Indexes: queryIndexes,
 						}
 					} else if rp.query.all {
-						c.value = Result{
+						c.value = &Result{
 							Raw:  "[]",
 							Type: JSON,
 						}
@@ -1817,7 +1835,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					qval.Raw = val
 					qval.Type = Number
 					qval.Num, _ = strconv.ParseFloat(val, 64)
-					if procQuery(qval) {
+					if procQuery(&qval) {
 						return i, true
 					}
 				} else if hit {
@@ -1921,8 +1939,8 @@ func splitPossiblePipe(path string) (left, right string, ok bool) {
 // ForEachLine iterates through lines of JSON as specified by the JSON Lines
 // format (http://jsonlines.org/).
 // Each line is returned as a GJSON Result.
-func ForEachLine(json string, iterator func(line Result) bool) {
-	var res Result
+func ForEachLine(json string, iterator func(line *Result) bool) {
+	var res *Result
 	var i int
 	for {
 		i, res, _ = parseAny(json, i, true)
@@ -2109,7 +2127,7 @@ func AppendJSONString(dst []byte, s string) []byte {
 
 type parseContext struct {
 	json  string
-	value Result
+	value *Result
 	pipe  string
 	piped bool
 	calcd bool
@@ -2149,7 +2167,7 @@ type parseContext struct {
 // Invalid json will not panic, but it may return back unexpected results.
 // If you are consuming JSON from an unpredictable source then you may want to
 // use the Valid function first.
-func Get(json, path string) Result {
+func Get(json, path string) *Result {
 	if len(path) > 1 {
 		if (path[0] == '@' && !DisableModifiers) || path[0] == '!' {
 			// possible modifier
@@ -2220,7 +2238,7 @@ func Get(json, path string) Result {
 						}
 					}
 					b = append(b, kind+2)
-					var res Result
+					res := &Result{}
 					res.Raw = string(b)
 					res.Type = JSON
 					if len(path) > 0 {
@@ -2233,7 +2251,7 @@ func Get(json, path string) Result {
 		}
 	}
 	var i int
-	var c = &parseContext{json: json}
+	c := &parseContext{json: json, value: &Result{}}
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
 		parseArray(c, 0, path[2:])
@@ -2262,7 +2280,7 @@ func Get(json, path string) Result {
 
 // GetBytes searches json for the specified path.
 // If working with bytes, this method preferred over Get(string(data), path)
-func GetBytes(json []byte, path string) Result {
+func GetBytes(json []byte, path string) *Result {
 	return getBytes(json, path)
 }
 
@@ -2274,7 +2292,7 @@ func runeit(json string) rune {
 
 // unescape unescapes a string
 func unescape(json string) string {
-	var str = make([]byte, 0, len(json))
+	str := make([]byte, 0, len(json))
 	for i := 0; i < len(json); i++ {
 		switch {
 		default:
@@ -2336,7 +2354,7 @@ func unescape(json string) string {
 // The order when comparing two different type is:
 //
 //	Null < False < Number < String < True < JSON
-func (t Result) Less(token Result, caseSensitive bool) bool {
+func (t *Result) Less(token *Result, caseSensitive bool) bool {
 	if t.Type < token.Type {
 		return true
 	}
@@ -2395,7 +2413,7 @@ func stringLessInsensitive(a, b string) bool {
 // parseAny parses the next value from a json string.
 // A Result is returned when the hit param is set.
 // The return values are (i int, res Result, ok bool)
-func parseAny(json string, i int, hit bool) (int, Result, bool) {
+func parseAny(json string, i int, hit bool) (int, *Result, bool) {
 	var res Result
 	var val string
 	for ; i < len(json); i++ {
@@ -2405,9 +2423,9 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 				res.Raw = val
 				res.Type = JSON
 			}
-			var tmp parseContext
-			tmp.value = res
-			fillIndex(json, &tmp)
+			tmp := newParseContext()
+			tmp.value = &res
+			fillIndex(json, tmp)
 			return i, tmp.value, true
 		}
 		if json[i] <= ' ' {
@@ -2421,7 +2439,7 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 			var ok bool
 			i, val, vesc, ok = parseString(json, i)
 			if !ok {
-				return i, res, false
+				return i, &res, false
 			}
 			if hit {
 				res.Type = String
@@ -2432,7 +2450,7 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 					res.Str = val[1 : len(val)-1]
 				}
 			}
-			return i, res, true
+			return i, &res, true
 		case 'n':
 			if i+1 < len(json) && json[i+1] != 'u' {
 				num = true
@@ -2450,7 +2468,7 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 				case 'f':
 					res.Type = False
 				}
-				return i, res, true
+				return i, &res, true
 			}
 		case '+', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
 			'i', 'I', 'N':
@@ -2463,18 +2481,18 @@ func parseAny(json string, i int, hit bool) (int, Result, bool) {
 				res.Type = Number
 				res.Num, _ = strconv.ParseFloat(val, 64)
 			}
-			return i, res, true
+			return i, &res, true
 		}
 
 	}
-	return i, res, false
+	return i, &res, false
 }
 
 // GetMany searches json for the multiple paths.
 // The return value is a Result array where the number of items
 // will be equal to the number of input paths.
-func GetMany(json string, path ...string) []Result {
-	res := make([]Result, len(path))
+func GetMany(json string, path ...string) []*Result {
+	res := make([]*Result, len(path))
 	for i, path := range path {
 		res[i] = Get(json, path)
 	}
@@ -2484,8 +2502,8 @@ func GetMany(json string, path ...string) []Result {
 // GetManyBytes searches json for the multiple paths.
 // The return value is a Result array where the number of items
 // will be equal to the number of input paths.
-func GetManyBytes(json []byte, path ...string) []Result {
-	res := make([]Result, len(path))
+func GetManyBytes(json []byte, path ...string) []*Result {
+	res := make([]*Result, len(path))
 	for i, path := range path {
 		res[i] = GetBytes(json, path)
 	}
@@ -2515,6 +2533,7 @@ func validpayload(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validany(data []byte, i int) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		switch data[i] {
@@ -2540,6 +2559,7 @@ func validany(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validobject(data []byte, i int) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		switch data[i] {
@@ -2582,6 +2602,7 @@ func validobject(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validcolon(data []byte, i int) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		switch data[i] {
@@ -2595,6 +2616,7 @@ func validcolon(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validcomma(data []byte, i int, end byte) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		switch data[i] {
@@ -2610,6 +2632,7 @@ func validcomma(data []byte, i int, end byte) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validarray(data []byte, i int) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		switch data[i] {
@@ -2633,6 +2656,7 @@ func validarray(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validstring(data []byte, i int) (outi int, ok bool) {
 	for ; i < len(data); i++ {
 		if data[i] < ' ' {
@@ -2665,6 +2689,7 @@ func validstring(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validnumber(data []byte, i int) (outi int, ok bool) {
 	i--
 	// sign
@@ -2747,6 +2772,7 @@ func validtrue(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validfalse(data []byte, i int) (outi int, ok bool) {
 	if i+4 <= len(data) && data[i] == 'a' && data[i+1] == 'l' &&
 		data[i+2] == 's' && data[i+3] == 'e' {
@@ -2754,6 +2780,7 @@ func validfalse(data []byte, i int) (outi int, ok bool) {
 	}
 	return i, false
 }
+
 func validnull(data []byte, i int) (outi int, ok bool) {
 	if i+3 <= len(data) && data[i] == 'u' && data[i+1] == 'l' &&
 		data[i+2] == 'l' {
@@ -2995,7 +3022,7 @@ func cleanWS(s string) string {
 func modPretty(json, arg string) string {
 	if len(arg) > 0 {
 		opts := *pretty.DefaultOptions
-		Parse(arg).ForEach(func(key, value Result) bool {
+		Parse(arg).ForEach(func(key, value *Result) bool {
 			switch key.String() {
 			case "sortKeys":
 				opts.SortKeys = value.Bool()
@@ -3027,8 +3054,8 @@ func modUgly(json, arg string) string {
 func modReverse(json, arg string) string {
 	res := Parse(json)
 	if res.IsArray() {
-		var values []Result
-		res.ForEach(func(_, value Result) bool {
+		var values []*Result
+		res.ForEach(func(_, value *Result) bool {
 			values = append(values, value)
 			return true
 		})
@@ -3044,8 +3071,8 @@ func modReverse(json, arg string) string {
 		return bytesString(out)
 	}
 	if res.IsObject() {
-		var keyValues []Result
-		res.ForEach(func(key, value Result) bool {
+		var keyValues []*Result
+		res.ForEach(func(key, value *Result) bool {
 			keyValues = append(keyValues, key, value)
 			return true
 		})
@@ -3081,7 +3108,7 @@ func modFlatten(json, arg string) string {
 	}
 	var deep bool
 	if arg != "" {
-		Parse(arg).ForEach(func(key, value Result) bool {
+		Parse(arg).ForEach(func(key, value *Result) bool {
 			if key.String() == "deep" {
 				deep = value.Bool()
 			}
@@ -3091,7 +3118,7 @@ func modFlatten(json, arg string) string {
 	var out []byte
 	out = append(out, '[')
 	var idx int
-	res.ForEach(func(_, value Result) bool {
+	res.ForEach(func(_, value *Result) bool {
 		var raw string
 		if value.IsArray() {
 			if deep {
@@ -3128,7 +3155,7 @@ func modKeys(json, arg string) string {
 	var out strings.Builder
 	out.WriteByte('[')
 	var i int
-	v.ForEach(func(key, _ Result) bool {
+	v.ForEach(func(key, _ *Result) bool {
 		if i > 0 {
 			out.WriteByte(',')
 		}
@@ -3158,7 +3185,7 @@ func modValues(json, arg string) string {
 	var out strings.Builder
 	out.WriteByte('[')
 	var i int
-	v.ForEach(func(_, value Result) bool {
+	v.ForEach(func(_, value *Result) bool {
 		if i > 0 {
 			out.WriteByte(',')
 		}
@@ -3190,7 +3217,7 @@ func modJoin(json, arg string) string {
 	}
 	var preserve bool
 	if arg != "" {
-		Parse(arg).ForEach(func(key, value Result) bool {
+		Parse(arg).ForEach(func(key, value *Result) bool {
 			if key.String() == "preserve" {
 				preserve = value.Bool()
 			}
@@ -3202,7 +3229,7 @@ func modJoin(json, arg string) string {
 	if preserve {
 		// Preserve duplicate keys.
 		var idx int
-		res.ForEach(func(_, value Result) bool {
+		res.ForEach(func(_, value *Result) bool {
 			if !value.IsObject() {
 				return true
 			}
@@ -3215,13 +3242,13 @@ func modJoin(json, arg string) string {
 		})
 	} else {
 		// Deduplicate keys and generate an object with stable ordering.
-		var keys []Result
-		kvals := make(map[string]Result)
-		res.ForEach(func(_, value Result) bool {
+		var keys []*Result
+		kvals := make(map[string]*Result)
+		res.ForEach(func(_, value *Result) bool {
 			if !value.IsObject() {
 				return true
 			}
-			value.ForEach(func(key, value Result) bool {
+			value.ForEach(func(key, value *Result) bool {
 				k := key.String()
 				if _, ok := kvals[k]; !ok {
 					keys = append(keys, key)
@@ -3276,12 +3303,12 @@ func modGroup(json, arg string) string {
 		return ""
 	}
 	var all [][]byte
-	res.ForEach(func(key, value Result) bool {
+	res.ForEach(func(key, value *Result) bool {
 		if !value.IsArray() {
 			return true
 		}
 		var idx int
-		value.ForEach(func(_, value Result) bool {
+		value.ForEach(func(_, value *Result) bool {
 			if idx == len(all) {
 				all = append(all, []byte{})
 			}
@@ -3321,8 +3348,8 @@ type sliceHeader struct {
 // getBytes casts the input json bytes to a string and safely returns the
 // results as uniquely allocated data. This operation is intended to minimize
 // copies and allocations for the large json string->[]byte.
-func getBytes(json []byte, path string) Result {
-	var result Result
+func getBytes(json []byte, path string) *Result {
+	var result *Result
 	if json != nil {
 		// unsafe cast to string
 		result = Get(*(*string)(unsafe.Pointer(&json)), path)
@@ -3453,12 +3480,12 @@ func revSquash(json string) string {
 // Returns an empty string if the paths cannot be determined, which can happen
 // when the Result came from a path that contained a multipath, modifier,
 // or a nested query.
-func (t Result) Paths(json string) []string {
+func (t *Result) Paths(json string) []string {
 	if len(t.Indexes) == 0 {
 		return nil
 	}
 	paths := make([]string, 0, len(t.Indexes))
-	t.ForEach(func(_, value Result) bool {
+	t.ForEach(func(_, value *Result) bool {
 		paths = append(paths, value.Path(json))
 		return true
 	})
@@ -3482,7 +3509,7 @@ func (t Result) Paths(json string) []string {
 // Returns an empty string if the paths cannot be determined, which can happen
 // when the Result came from a path that contained a multipath, modifier,
 // or a nested query.
-func (t Result) Path(json string) string {
+func (t *Result) Path(json string) string {
 	var path []byte
 	var comps []string // raw components
 	i := t.Index - 1
@@ -3604,12 +3631,12 @@ func Escape(comp string) string {
 	return comp
 }
 
-func parseRecursiveDescent(all []Result, parent Result, path string) []Result {
+func parseRecursiveDescent(all []*Result, parent *Result, path string) []*Result {
 	if res := parent.Get(path); res.Exists() {
 		all = append(all, res)
 	}
 	if parent.IsArray() || parent.IsObject() {
-		parent.ForEach(func(_, val Result) bool {
+		parent.ForEach(func(_, val *Result) bool {
 			all = parseRecursiveDescent(all, val, path)
 			return true
 		})
