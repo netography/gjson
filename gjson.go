@@ -1563,8 +1563,8 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				multires = append(multires, '[')
 			}
 		}
-		tmp := parseContext{}
-		tmp.value = *qval
+		tmp := parseContext{value: &Result{}}
+		*tmp.value = *qval
 		fillIndex(c.json, &tmp)
 		parentIndex := tmp.value.Index
 		res := &Result{}
@@ -1601,7 +1601,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					queryIndexes = append(queryIndexes, res.Index+parentIndex)
 				}
 			} else {
-				c.value = *res
+				*c.value = *res
 				return true
 			}
 		}
@@ -2115,7 +2115,7 @@ func AppendJSONString(dst []byte, s string) []byte {
 
 type parseContext struct {
 	json  string
-	value Result
+	value *Result
 	pipe  string
 	piped bool
 	calcd bool
@@ -2239,7 +2239,7 @@ func Get(json, path string) *Result {
 		}
 	}
 	var i int
-	c := parseContext{value: Result{}}
+	c := parseContext{value: &Result{}}
 	c.json = json
 	if len(path) >= 2 && path[0] == '.' && path[1] == '.' {
 		c.lines = true
@@ -2264,7 +2264,7 @@ func Get(json, path string) *Result {
 		return res
 	}
 	fillIndex(json, &c)
-	return &c.value
+	return c.value
 }
 
 // GetBytes searches json for the specified path.
@@ -2413,9 +2413,10 @@ func parseAny(json string, i int, hit bool) (int, *Result, bool) {
 				res.Type = JSON
 			}
 			return func() (int, *Result, bool) {
-				tmp := parseContext{value: res}
+				tmp := parseContext{value: &Result{}}
+				*tmp.value = res
 				fillIndex(json, &tmp)
-				return i, &tmp.value, true
+				return i, tmp.value, true
 			}()
 		}
 		if json[i] <= ' ' {
