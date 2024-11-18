@@ -1802,17 +1802,17 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 							if idx < len(c.json) && c.json[idx] != ']' {
 								_, res, ok := parseAny(c.json, idx, true)
 								if ok {
-									res := res.Get(rp.alogkey)
-									if res.Exists() {
+									r2 := res.Get(rp.alogkey)
+									if r2.Exists() {
 										if k > 0 {
 											jsons = append(jsons, ',')
 										}
-										raw := res.Raw
+										raw := r2.Raw
 										if len(raw) == 0 {
-											raw = res.String()
+											raw = r2.String()
 										}
 										jsons = append(jsons, []byte(raw)...)
-										indexes = append(indexes, res.Index)
+										indexes = append(indexes, r2.Index)
 										k++
 									}
 								}

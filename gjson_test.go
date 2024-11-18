@@ -1902,6 +1902,32 @@ func TestSingleModifier(t *testing.T) {
 	assert(t, Get(data, "\\@key").String() == "value")
 }
 
+func TestGetWithReused(t *testing.T) {
+	AddModifier("case", func(json, arg string) string {
+		if arg == "upper" {
+			return strings.ToUpper(json)
+		}
+		if arg == "lower" {
+			return strings.ToLower(json)
+		}
+		return json
+	})
+	r := &Result{}
+	r.Parse(`{"friends": [
+		{"age": 44, "first": "Dale", "last": "Murphy"},
+		{"age": 68, "first": "Roger", "last": "Craig"},
+		{"age": 47, "first": "Jane", "last": "Murphy"}
+	]}`)
+	res := r.Get(`{friends.#.{age,first:first|@case:upper}|0.first}`)
+	exp := `{"first":"DALE"}`
+	assert(t, res.Raw == exp)
+	r.Clear()
+	r.Parse(readmeJSON)
+	res = r.Get(`{"children":children|@case:upper,"name":name.first,"age":age}`)
+	exp = `{"children":["SARA","ALEX","JACK"],"name":"Tom","age":37}`
+	assert(t, res.Raw == exp)
+}
+
 func TestModifiersInMultipaths(t *testing.T) {
 	AddModifier("case", func(json, arg string) string {
 		if arg == "upper" {
