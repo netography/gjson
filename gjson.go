@@ -526,11 +526,12 @@ func (value *Result) Clear() {
 	if value.Indexes != nil {
 		value.Indexes = value.Indexes[:0]
 	}
-	if !value.nopool {
+	if !value.nopool && value.children != nil {
 		for _, v := range value.children {
 			v.Clear()
 			resultPool.Put(v)
 		}
+		value.children = value.children[:0]
 	}
 }
 
