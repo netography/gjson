@@ -1254,6 +1254,12 @@ func parseSquash(json string, i int) (int, string) {
 	return i, json[s:]
 }
 
+func (c *parseContext) resultify() {
+	if c.value == nil {
+		c.value = &Result{}
+	}
+}
+
 func parseObject(c *parseContext, i int, path string) (int, bool) {
 	var pmatch, kesc, vesc, ok, hit bool
 	var key, val string
@@ -1342,9 +1348,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 					return i, false
 				}
 				if hit {
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					if vesc {
 						c.value.Str = unescape(val[1 : len(val)-1])
 					} else {
@@ -1363,9 +1367,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				} else {
 					i, val = parseSquash(c.json, i)
 					if hit {
-						if c.value == nil {
-							c.value = &Result{}
-						}
+						c.resultify()
 						c.value.Raw = val
 						c.value.Type = JSON
 						return i, true
@@ -1380,9 +1382,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				} else {
 					i, val = parseSquash(c.json, i)
 					if hit {
-						if c.value == nil {
-							c.value = &Result{}
-						}
+						c.resultify()
 						c.value.Raw = val
 						c.value.Type = JSON
 						return i, true
@@ -1398,9 +1398,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 				vc := c.json[i]
 				i, val = parseLiteral(c.json, i)
 				if hit {
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					c.value.Raw = val
 					switch vc {
 					case 't':
@@ -1417,9 +1415,7 @@ func parseObject(c *parseContext, i int, path string) (int, bool) {
 			if num {
 				i, val = parseNumber(c.json, i)
 				if hit {
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					c.value.Raw = val
 					c.value.Type = Number
 					c.value.Num, _ = strconv.ParseFloat(val, 64)
@@ -1698,9 +1694,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					if rp.alogok {
 						break
 					}
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					if vesc {
 						c.value.Str = unescape(val[1 : len(val)-1])
 					} else {
@@ -1729,9 +1723,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 						if rp.alogok {
 							break
 						}
-						if c.value == nil {
-							c.value = &Result{}
-						}
+						c.resultify()
 						c.value.Raw = val
 						c.value.Type = JSON
 						return i, true
@@ -1756,9 +1748,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 						if rp.alogok {
 							break
 						}
-						if c.value == nil {
-							c.value = &Result{}
-						}
+						c.resultify()
 						c.value.Raw = val
 						c.value.Type = JSON
 						return i, true
@@ -1789,9 +1779,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					if rp.alogok {
 						break
 					}
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					c.value.Raw = val
 					switch vc {
 					case 't':
@@ -1846,9 +1834,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 							}
 						}
 						jsons = append(jsons, ']')
-						if c.value == nil {
-							c.value = &Result{}
-						}
+						c.resultify()
 						c.value.Type = JSON
 						c.value.Raw = string(jsons)
 						c.value.Indexes = indexes
@@ -1857,9 +1843,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					if rp.alogok {
 						break
 					}
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					c.value.Type = Number
 					c.value.Num = float64(h - 1)
 					c.value.Raw = strconv.Itoa(h - 1)
@@ -1868,20 +1852,12 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 				}
 				if c.value == nil || !c.value.Exists() {
 					if len(multires) > 0 {
-						if c.value == nil {
-							c.value = &Result{}
-						} else {
-							c.value.Clear()
-						}
+						c.resultify()
 						c.value.Raw = string(append(multires, ']'))
 						c.value.Type = JSON
 						c.value.Indexes = queryIndexes
 					} else if rp.query.all {
-						if c.value == nil {
-							c.value = &Result{}
-						} else {
-							c.value.Clear()
-						}
+						c.resultify()
 						c.value.Raw="[]"
 						c.value.Type=JSON
 					}
@@ -1902,9 +1878,7 @@ func parseArray(c *parseContext, i int, path string) (int, bool) {
 					if rp.alogok {
 						break
 					}
-					if c.value == nil {
-						c.value = &Result{}
-					}
+					c.resultify()
 					c.value.Raw = val
 					c.value.Type = Number
 					c.value.Num, _ = strconv.ParseFloat(val, 64)
@@ -3492,9 +3466,7 @@ func getBytes(json []byte, path string) *Result {
 // of the resulting value. If the position cannot be found then Index zero is
 // used instead.
 func fillIndex(json string, c *parseContext) {
-	if c.value == nil {
-		c.value = &Result{}
-	}
+	c.resultify()
 	if len(c.value.Raw) > 0 && !c.calcd {
 		jhdr := *(*stringHeader)(unsafe.Pointer(&json))
 		rhdr := *(*stringHeader)(unsafe.Pointer(&(c.value.Raw)))
